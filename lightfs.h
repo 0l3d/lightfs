@@ -1,7 +1,7 @@
 #ifndef DEFINE_LIGHTFS
 #define DEFINE_LIGHTFS
 
-#define IMG "lfs"
+#define IMG "file.img"
 #define TYPEDIR 1
 #define TYPEFILE 2
 
@@ -20,7 +20,6 @@ typedef struct {
 typedef struct {
 	int data_size;
 	int data_start;
-	int data_end;
 } FileMetaBlock;
 
 typedef struct {

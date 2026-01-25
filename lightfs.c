@@ -81,6 +81,10 @@ read_dirs(DirBlock * dir, FILE * img)
 	fread(dir->name, 1, dir->meta.name_size, img);
 }
 
+void free_dirs(DirBlock *dir) {
+    free(dir->name);
+}
+
 void seek_dir(FILE *img) {
 	DirBlock dir;
 	fread(&dir.meta, sizeof(MetaBlock), 1, img);
@@ -123,9 +127,31 @@ newdir(const char *dirname, int parent_offset)
 	fclose(img);
 }
 
-void read_files(FileBlock *file, FILE* img) {}
+void read_files(FileBlock *file, FILE* img) {
+    fread(&file->meta, sizeof(MetaBlock), 1, img);
+    fread(&file->block, sizeof(FileMetaBlock), 1, img);
+    file->name = malloc(file->meta.name_size);
+    fread(file->name, 1, file->meta.name_size, img);
+    file->data = malloc(file->block.data_size);
+    fread(file->data, 1, file->block.data_size, img);
+}
 
-void 
+void free_files(FileBlock *file) {
+    free(file->name);
+    free(file->data);
+}
+
+void seek_files(FILE* img) {
+    FileBlock file;
+    fread(&file.meta, sizeof(MetaBlock), 1, img);
+    fread(&file.block, sizeof(FileMetaBlock), 1, img);
+    fseek(img, sizeof(MetaBlock), SEEK_CUR);
+    fseek(img, sizeof(FileMetaBlock), SEEK_CUR);
+    fseek(img, file.meta.name_size, SEEK_CUR);
+    fseek(img, file.block.data_size, SEEK_CUR);
+}
+
+void
 newfile(const char *filename, char *data, int parent_offset)
 {
 	FILE           *img;
@@ -158,11 +184,16 @@ newfile(const char *filename, char *data, int parent_offset)
 	fseek(img, write_pos, SEEK_SET);
 	fwrite(&type, sizeof(int), 1, img);
 	file.meta.offset = (int) ftell(img);
-	fwrite(&file, sizeof(FileBlock), 1, img);
+	fwrite(&file.meta, sizeof(MetaBlock), 1, img);
+	int data_start = (sizeof(MetaBlock) + sizeof(FileMetaBlock) + file.meta.name_size);
+	file.block.data_start = data_start;
+	fwrite(&file.block, sizeof(FileMetaBlock), 1, img);
+	fwrite(file.name, 1, file.meta.name_size, img);
+	fwrite(file.data, 1, file.block.data_size, img);
 	fclose(img);
 }
 
-void 
+void
 list(int dir_offset)
 {
 	FILE           *img = fopen(IMG, "rb");
@@ -181,7 +212,7 @@ list(int dir_offset)
 				printf("[DIR] %s\n", dir.name);
 			}
 		} else if (type == TYPEFILE) {
-			fread(&file, sizeof(FileBlock), 1, img);
+		    read_files(&file, img);
 			if (file.meta.isfree == 0 && file.meta.parent_offset == dir_offset) {
 				printf("[FILE] %s\n", file.name);
 			}
@@ -194,7 +225,7 @@ list(int dir_offset)
 	fclose(img);
 }
 
-int 
+int
 doffset(const char *dirname)
 {
 	FILE           *img = fopen(IMG, "rb");
@@ -207,13 +238,13 @@ doffset(const char *dirname)
 	DirBlock 	dir;
 	while (fread(&type, sizeof(int), 1, img) == 1) {
 		if (type == TYPEDIR) {
-			fread(&dir, sizeof(DirBlock), 1, img);
-			if (dir.meta.isfree == 0 && strcmp(dir.name, dirname) == 0) {
+            read_dirs(&dir, img);
+		    if (dir.meta.isfree == 0 && strcmp(dir.name, dirname) == 0) {
 				fclose(img);
 				return dir.meta.offset;
 			}
 		} else if (type == TYPEFILE) {
-			fseek(img, sizeof(FileBlock), SEEK_CUR);
+		    seek_files(img);
 		} else {
 			break;
 		}
@@ -222,7 +253,7 @@ doffset(const char *dirname)
 	return 0;
 }
 
-void 
+void
 file_del(const char *filename, int parent_offset)
 {
 	FILE           *img = fopen(IMG, "r+b");
@@ -247,7 +278,7 @@ file_del(const char *filename, int parent_offset)
 				return;
 			}
 		} else if (type == TYPEDIR) {
-			seek_dir(img);			
+			seek_dir(img);
 		} else {
 			perror("type is not found");
 			return;
@@ -257,7 +288,7 @@ file_del(const char *filename, int parent_offset)
 	fprintf(stderr, "file not found\n");
 }
 
-void 
+void
 del_dir(const char *dirname, int parent_offset)
 {
 	FILE           *img = fopen(IMG, "r+b");
@@ -288,7 +319,7 @@ del_dir(const char *dirname, int parent_offset)
 	}
 }
 
-void 
+void
 lookatdata(const char *filename, int parent_offset, char *out,
 	   size_t size)
 {
@@ -322,7 +353,7 @@ lookatdata(const char *filename, int parent_offset, char *out,
 	return;
 }
 
-void 
+void
 cd(char *foldername)
 {
 	FILE           *img = fopen(IMG, "rb");
@@ -334,11 +365,12 @@ cd(char *foldername)
 	int 		type;
 	while (fread(&type, sizeof(int), 1, img) == 1) {
 		if (type == TYPEDIR) {
-			fread(&dir, sizeof(DirBlock), 1, img);
+		    read_dirs(&dir, img);
 			if (strcmp(foldername, "..") == 0) {
 				if (dir.meta.offset == movement_parent) {
 					movement_parent = dir.meta.parent_offset;
 					fclose(img);
+					free_dirs(&dir);
 					return;
 				}
 			} else if (dir.meta.isfree == 0 && dir.meta.parent_offset == movement_parent &&
@@ -346,17 +378,18 @@ cd(char *foldername)
 				old_parent = movement_parent;
 				movement_parent = dir.meta.offset;
 				fclose(img);
+				free_dirs(&dir);
 				return;
 			}
 		} else if (type == TYPEFILE) {
-			fseek(img, sizeof(FileBlock), SEEK_CUR);
+		    seek_files(img);
 		}
 	}
-
 	printf("Folder '%s' not found.\n", foldername);
 	fclose(img);
 }
-void 
+
+void
 pwd(char *pwdout)
 {
 	FILE           *img = fopen(IMG, "rb");
@@ -392,10 +425,9 @@ pwd(char *pwdout)
 	fclose(img);
 }
 
-int 
+int
 main()
 {
-	remove(IMG);
 	int 		loop = 1;
 	newdir("quickstart", 0);
 	// newfile("quickstart.txt", data, doffset("quickstart"));
