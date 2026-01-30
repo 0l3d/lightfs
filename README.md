@@ -1,6 +1,6 @@
 # Lightfs
 
-Lightweight and Simple filesystem simulator.
+Lightweight and Simple filesystem simulator and library.
 
 ## Features
 

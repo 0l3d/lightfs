@@ -21,7 +21,9 @@ DirBlock       *dirs = NULL;
 struct Overwrite write;
 
 int
-overwrite(int mode) {}
+overwrite(int mode) {
+    return -1;
+}
 /*
 {
 	FILE           *img = fopen(IMG, "rb");
@@ -91,9 +93,96 @@ void seek_dir(FILE *img) {
 	fseek(img, dir.meta.name_size, SEEK_CUR);
 }
 
+void read_files(FileBlock *file, FILE* img) {
+    fread(&file->meta, sizeof(MetaBlock), 1, img);
+    fread(&file->block, sizeof(FileMetaBlock), 1, img);
+    file->name = malloc(file->meta.name_size);
+    fread(file->name, 1, file->meta.name_size, img);
+    file->data = malloc(file->block.data_size);
+    fread(file->data, 1, file->block.data_size, img);
+}
+
+void free_files(FileBlock *file) {
+    free(file->name);
+    free(file->data);
+}
+
+void seek_files(FILE* img) {
+    FileBlock file;
+    fread(&file.meta, sizeof(MetaBlock), 1, img);
+    fread(&file.block, sizeof(FileMetaBlock), 1, img);
+    fseek(img, file.meta.name_size, SEEK_CUR);
+    fseek(img, file.block.data_size, SEEK_CUR);
+}
+
+void
+shiftIT(int start, int end, int mode) {
+ // mode 1 -> delete and shift
+ // mode 2 -> delete but wait for new file and then shift
+}
+
+int
+doffset(const char *dirname)
+{
+	FILE           *img = fopen(IMG, "rb");
+	if (img == NULL) {
+		perror("foffset file open failed");
+		return -1;
+	}
+	int 		type;
+
+	DirBlock 	dir;
+	while (fread(&type, sizeof(int), 1, img) == 1) {
+		if (type == TYPEDIR) {
+            read_dirs(&dir, img);
+		    if (dir.meta.isfree == 0 && strcmp(dir.name, dirname) == 0) {
+				fclose(img);
+				return dir.meta.offset;
+			}
+		} else if (type == TYPEFILE) {
+		    seek_files(img);
+		} else {
+			break;
+		}
+	}
+	fclose(img);
+	return 0;
+}
+
+int
+foffset(const char *filename)
+{
+	FILE           *img = fopen(IMG, "rb");
+	if (img == NULL) {
+		perror("foffset file open failed");
+		return -1;
+	}
+	int 		type;
+
+	FileBlock   file;
+	while (fread(&type, sizeof(int), 1, img) == 1) {
+		if (type == TYPEFILE) {
+            read_files(&file, img);
+		    if (file.meta.isfree == 0 && strcmp(file.name, filename) == 0) {
+				fclose(img);
+				return file.meta.offset;
+			}
+		} else if (type == TYPEDIR) {
+		    seek_dir(img);
+		} else {
+			break;
+		}
+	}
+	fclose(img);
+	return 0;
+}
+
 void
 newdir(const char *dirname, int parent_offset)
 {
+    if (doffset(dirname) != 0) {
+        return;
+    };
 	FILE           *img;
 	DirBlock 	dir;
 	dir.meta.name_size = strlen(dirname) + 1;
@@ -126,41 +215,22 @@ newdir(const char *dirname, int parent_offset)
 	fclose(img);
 }
 
-void read_files(FileBlock *file, FILE* img) {
-    fread(&file->meta, sizeof(MetaBlock), 1, img);
-    fread(&file->block, sizeof(FileMetaBlock), 1, img);
-    file->name = malloc(file->meta.name_size);
-    fread(file->name, 1, file->meta.name_size, img);
-    file->data = malloc(file->block.data_size);
-    fread(file->data, 1, file->block.data_size, img);
-}
-
-void free_files(FileBlock *file) {
-    free(file->name);
-    free(file->data);
-}
-
-void seek_files(FILE* img) {
-    FileBlock file;
-    fread(&file.meta, sizeof(MetaBlock), 1, img);
-    fread(&file.block, sizeof(FileMetaBlock), 1, img);
-    fseek(img, file.meta.name_size, SEEK_CUR);
-    fseek(img, file.block.data_size, SEEK_CUR);
-}
-
 void
 newfile(const char *filename, char *data, int parent_offset)
 {
+    if (foffset(filename) != 0) {
+        return;
+    }
 	FILE           *img;
 	FileBlock 	file;
 	file.meta.name_size = strlen(filename);
 	file.name = malloc(file.meta.name_size + 1);
 	strncpy(file.name, filename, file.meta.name_size);
-	file.name[file.meta.name_size - 1] = '\0';
+	file.name[file.meta.name_size] = '\0';
 	file.block.data_size = strlen(data);
 	file.data = malloc(file.block.data_size + 1);
 	strncpy(file.data, data, file.block.data_size);
-	file.data[file.block.data_size - 1] = '\0';
+	file.data[file.block.data_size] = '\0';
 	file.meta.parent_offset = parent_offset;
 	file.meta.isfree = 0;
 	int 		type = TYPEFILE;
@@ -221,36 +291,11 @@ list(int dir_offset)
 	fclose(img);
 }
 
-int
-doffset(const char *dirname)
-{
-	FILE           *img = fopen(IMG, "rb");
-	if (img == NULL) {
-		perror("foffset file open failed");
-		return -1;
-	}
-	int 		type;
 
-	DirBlock 	dir;
-	while (fread(&type, sizeof(int), 1, img) == 1) {
-		if (type == TYPEDIR) {
-            read_dirs(&dir, img);
-		    if (dir.meta.isfree == 0 && strcmp(dir.name, dirname) == 0) {
-				fclose(img);
-				return dir.meta.offset;
-			}
-		} else if (type == TYPEFILE) {
-		    seek_files(img);
-		} else {
-			break;
-		}
-	}
-	fclose(img);
-	return 0;
-}
 
 void
-file_del(const char *filename, int parent_offset)
+file_del(const char *filename, int parent_offset) {}
+/*
 {
 	FILE           *img = fopen(IMG, "r+b");
 	if (img == NULL) {
@@ -283,9 +328,11 @@ file_del(const char *filename, int parent_offset)
 	fclose(img);
 	fprintf(stderr, "file not found\n");
 }
+*/
 
 void
-del_dir(const char *dirname, int parent_offset)
+del_dir(const char *dirname, int parent_offset) {}
+/*
 {
 	FILE           *img = fopen(IMG, "r+b");
 	if (img == NULL) {
@@ -314,6 +361,7 @@ del_dir(const char *dirname, int parent_offset)
 		}
 	}
 }
+*/
 
 void
 lookatdata(const char *filename, int parent_offset, char *out,
@@ -329,7 +377,7 @@ lookatdata(const char *filename, int parent_offset, char *out,
 
 	while (fread(&type, sizeof(int), 1, img) == 1) {
 		if (type == TYPEFILE) {
-			fread(&file, sizeof(FileBlock), 1, img);
+			read_files(&file, img);
 			if (file.meta.isfree == 0 && file.meta.parent_offset == parent_offset &&
 			    strcmp(file.name, filename) == 0) {
 				strncpy(out, file.data, size - 1);
@@ -427,7 +475,7 @@ main()
 {
 	int 		loop = 1;
 	newdir("quickstart", 0);
-	// newfile("quickstart.txt", data, doffset("quickstart"));
+	newfile("quickstart.txt", data, doffset("quickstart"));
 
 	while (loop) {
 		char 		pwdout   [256];
