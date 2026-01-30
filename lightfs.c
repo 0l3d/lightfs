@@ -88,7 +88,6 @@ void free_dirs(DirBlock *dir) {
 void seek_dir(FILE *img) {
 	DirBlock dir;
 	fread(&dir.meta, sizeof(MetaBlock), 1, img);
-	fseek(img, sizeof(MetaBlock), SEEK_CUR);
 	fseek(img, dir.meta.name_size, SEEK_CUR);
 }
 
@@ -145,8 +144,6 @@ void seek_files(FILE* img) {
     FileBlock file;
     fread(&file.meta, sizeof(MetaBlock), 1, img);
     fread(&file.block, sizeof(FileMetaBlock), 1, img);
-    fseek(img, sizeof(MetaBlock), SEEK_CUR);
-    fseek(img, sizeof(FileMetaBlock), SEEK_CUR);
     fseek(img, file.meta.name_size, SEEK_CUR);
     fseek(img, file.block.data_size, SEEK_CUR);
 }
@@ -155,12 +152,11 @@ void
 newfile(const char *filename, char *data, int parent_offset)
 {
 	FILE           *img;
-
 	FileBlock 	file;
-	file.meta.name_size = strlen(data);
+	file.meta.name_size = strlen(filename);
 	file.name = malloc(file.meta.name_size + 1);
 	strncpy(file.name, filename, file.meta.name_size);
-	file.name[sizeof(file.name) - 1] = '\0';
+	file.name[file.meta.name_size - 1] = '\0';
 	file.block.data_size = strlen(data);
 	file.data = malloc(file.block.data_size + 1);
 	strncpy(file.data, data, file.block.data_size);
@@ -361,6 +357,7 @@ cd(char *foldername)
 		perror("cd open failed");
 		return;
 	}
+
 	DirBlock 	dir;
 	int 		type;
 	while (fread(&type, sizeof(int), 1, img) == 1) {
@@ -406,7 +403,7 @@ pwd(char *pwdout)
 		fseek(img, 0, SEEK_SET);
 		while (fread(&type, sizeof(type), 1, img) == 1) {
 			if (type == TYPEDIR) {
-				fread(&dir, sizeof(DirBlock), 1, img);
+				read_dirs(&dir, img);
 				if (dir.meta.offset == curroffset) {
 					char 		temp     [1024];
 					snprintf(temp, sizeof(temp), "/%s%s", dir.name, path);
@@ -415,7 +412,7 @@ pwd(char *pwdout)
 					break;
 				}
 			} else if (type == TYPEFILE) {
-				fseek(img, sizeof(FileBlock), SEEK_CUR);
+				seek_files(img);
 			}
 		}
 	}
