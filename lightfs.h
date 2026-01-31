@@ -13,6 +13,11 @@ typedef struct {
 } MetaBlock;
 
 typedef struct {
+    char *name;
+    int type;
+} Shifting;
+
+typedef struct {
 	MetaBlock 		meta;
 	char           *name;
 } DirBlock;

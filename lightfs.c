@@ -1,3 +1,4 @@
+#include <complex.h>
 #include <endian.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -115,18 +116,12 @@ void seek_files(FILE* img) {
     fseek(img, file.block.data_size, SEEK_CUR);
 }
 
-void
-shiftIT(int start, int end, int mode) {
- // mode 1 -> delete and shift
- // mode 2 -> delete but wait for new file and then shift
-}
-
 int
 doffset(const char *dirname)
 {
 	FILE           *img = fopen(IMG, "rb");
 	if (img == NULL) {
-		perror("foffset file open failed");
+		perror("doffset file open failed");
 		return -1;
 	}
 	int 		type;
@@ -176,6 +171,35 @@ foffset(const char *filename)
 	fclose(img);
 	return 0;
 }
+
+void
+shiftIT(Shifting shift) {
+    FILE *img = fopen(IMG, "r+b");
+    if (img == NULL) {
+        perror("shiftit file open failed");
+        return;
+    }
+
+    DirBlock dir;
+    FileBlock file;
+
+    fseek(img, 0, SEEK_END);
+    int filesize = (int) ftell(img);
+
+    if (shift.type == TYPEFILE) {
+        int offsetoffile = foffset(shift.name);
+        fseek(img, offsetoffile, SEEK_SET);
+        int file_start = (int) ftell(img) - sizeof(int); // int -> type
+        read_files(&file, img);
+        int all_size_of_data = sizeof(file.meta) + sizeof(file.block) + file.meta.name_size + file.block.data_size;
+        // int size_fromend = (all_size_of_data - file_start) -
+
+    }
+    else {}
+
+}
+
+
 
 void
 newdir(const char *dirname, int parent_offset)
@@ -476,6 +500,11 @@ main()
 	int 		loop = 1;
 	newdir("quickstart", 0);
 	newfile("quickstart.txt", data, doffset("quickstart"));
+
+	Shifting shift;
+	shift.type = TYPEFILE;
+	shift.name = "quickstart.txt";
+	shiftIT(shift);
 
 	while (loop) {
 		char 		pwdout   [256];
