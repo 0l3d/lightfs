@@ -1,11 +1,27 @@
 #include <complex.h>
-#include <endian.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
-#include <pthread.h>
 #include <stdlib.h>
 #include "lightfs.h"
+
+
+#if defined(_WIN32)
+    #include <io.h>
+    #include <fcntl.h>
+    #define TRUNCATE _chsize
+#else
+    #include <unistd.h>
+    #define TRUNCATE ftruncate
+#endif
+
+int
+file_truncate(FILE *fp, long new_size)
+{
+    int fd = fileno(fp);
+    return TRUNCATE(fd, new_size);
+}
+
 
 char 		data     [] = "Welcome to Lightfs!\n"
 "Features:\n"
@@ -19,62 +35,6 @@ int 		movement_parent = 0;
 int 		old_parent = 0;
 
 DirBlock       *dirs = NULL;
-struct Overwrite write;
-
-int
-overwrite(int mode) {
-    return -1;
-}
-/*
-{
-	FILE           *img = fopen(IMG, "rb");
-	if (img == NULL) {
-		return -1;
-	}
-	int 		type;
-	if (mode == 0) {
-		DirBlock 	dir;
-		while (fread(&type, sizeof(int), 1, img) == 1) {
-			long 		pos = ftell(img) - sizeof(int);
-			if (type == TYPEDIR) {
-				fread(&dir, sizeof(DirBlock), 1, img);
-				if (dir.isfree == 1) {
-					write.overwritable = 1;
-					write.diroffset = pos;
-					fclose(img);
-					return 0;
-				}
-			} else {
-				if (type == TYPEFILE)
-					fseek(img, sizeof(FileBlock), SEEK_CUR);
-				else
-					break;
-			}
-		}
-	} else {
-		FileBlock 	file;
-		while (fread(&type, sizeof(int), 1, img) == 1) {
-			long 		pos = ftell(img) - sizeof(int);
-			if (type == TYPEFILE) {
-				fread(&file, sizeof(FileBlock), 1, img);
-				if (file.isfree == 1) {
-					write.overwritable = 1;
-					write.fileoffset = pos;
-					fclose(img);
-					return 1;
-				}
-			} else {
-				if (type == TYPEDIR)
-					fseek(img, sizeof(DirBlock), SEEK_CUR);
-				else
-					break;
-			}
-		}
-	}
-	fclose(img);
-	return -1;
-}
-*/
 
 void
 read_dirs(DirBlock * dir, FILE * img)
@@ -103,6 +63,20 @@ void read_files(FileBlock *file, FILE* img) {
     fread(file->data, 1, file->block.data_size, img);
 }
 
+void write_files(FileBlock file, FILE* img) {
+	fwrite(&file.meta, sizeof(MetaBlock), 1, img);
+	int data_start = (sizeof(MetaBlock) + sizeof(FileMetaBlock) + file.meta.name_size);
+	file.block.data_start = data_start;
+	fwrite(&file.block, sizeof(FileMetaBlock), 1, img);
+	fwrite(file.name, 1, file.meta.name_size, img);
+	fwrite(file.data, 1, file.block.data_size, img);
+}
+
+void write_dirs(DirBlock dir, FILE *img) {
+	fwrite(&dir.meta, sizeof(MetaBlock), 1, img);
+	fwrite(dir.name, 1, dir.meta.name_size, img);
+}
+
 void free_files(FileBlock *file) {
     free(file->name);
     free(file->data);
@@ -117,9 +91,9 @@ void seek_files(FILE* img) {
 }
 
 int
-doffset(const char *dirname)
+doffset(const char* img_name, const char *dirname)
 {
-	FILE           *img = fopen(IMG, "rb");
+	FILE           *img = fopen(img_name, "rb");
 	if (img == NULL) {
 		perror("doffset file open failed");
 		return -1;
@@ -132,7 +106,9 @@ doffset(const char *dirname)
             read_dirs(&dir, img);
 		    if (dir.meta.isfree == 0 && strcmp(dir.name, dirname) == 0) {
 				fclose(img);
-				return dir.meta.offset;
+				int offset = dir.meta.offset;
+				free_dirs(&dir);
+				return offset;
 			}
 		} else if (type == TYPEFILE) {
 		    seek_files(img);
@@ -145,9 +121,9 @@ doffset(const char *dirname)
 }
 
 int
-foffset(const char *filename)
+foffset(const char* img_name, const char *filename)
 {
-	FILE           *img = fopen(IMG, "rb");
+	FILE           *img = fopen(img_name, "rb");
 	if (img == NULL) {
 		perror("foffset file open failed");
 		return -1;
@@ -160,8 +136,11 @@ foffset(const char *filename)
             read_files(&file, img);
 		    if (file.meta.isfree == 0 && strcmp(file.name, filename) == 0) {
 				fclose(img);
-				return file.meta.offset;
+				int offset = file.meta.offset;
+				free_files(&file);
+				return offset;
 			}
+			free_files(&file);
 		} else if (type == TYPEDIR) {
 		    seek_dir(img);
 		} else {
@@ -172,9 +151,74 @@ foffset(const char *filename)
 	return 0;
 }
 
+
 void
-shiftIT(Shifting shift) {
-    FILE *img = fopen(IMG, "r+b");
+fixoffset(FILE *img, int removed_start, int removed_size)
+{
+    fseek(img, 0, SEEK_SET);
+
+    while (1) {
+        long entry_start = ftell(img);
+        int type;
+
+        if (fread(&type, sizeof(int), 1, img) != 1)
+            break;
+
+        if (type == TYPEFILE) {
+            FileBlock file;
+            read_files(&file, img);
+
+
+            int removed_end = removed_start + removed_size;
+
+            if (file.meta.offset >= removed_end)
+                file.meta.offset -= removed_size;
+
+            if (file.meta.parent_offset >= removed_end)
+                file.meta.parent_offset -= removed_size;
+
+
+            fseek(img, entry_start + sizeof(int), SEEK_SET);
+            write_files(file, img);
+
+            free_files(&file);
+        }
+        else if (type == TYPEDIR) {
+            DirBlock dir;
+            read_dirs(&dir, img);
+
+
+            int removed_end = removed_start + removed_size;
+
+            if (dir.meta.offset >= removed_end) {
+                dir.meta.offset -= removed_size;
+            }
+            else if (dir.meta.offset >= removed_start) {
+                dir.meta.offset = -1;
+            }
+
+            if (dir.meta.parent_offset >= removed_end) {
+                dir.meta.parent_offset -= removed_size;
+            }
+            else if (dir.meta.parent_offset >= removed_start) {
+                dir.meta.parent_offset = -1;
+            }
+            fseek(img, entry_start + sizeof(int), SEEK_SET);
+            write_dirs(dir, img);
+
+            free_dirs(&dir);
+        }
+        else {
+            /* fs corruption */
+            break;
+        }
+    }
+}
+
+
+void
+shiftIT(const char* img_name, Shifting shift) {
+    FILE *img = fopen(img_name, "r+b");
     if (img == NULL) {
         perror("shiftit file open failed");
         return;
@@ -187,24 +231,145 @@ shiftIT(Shifting shift) {
     int filesize = (int) ftell(img);
 
     if (shift.type == TYPEFILE) {
-        int offsetoffile = foffset(shift.name);
+        int offsetoffile = foffset(img_name,shift.name);
         fseek(img, offsetoffile, SEEK_SET);
-        int file_start = (int) ftell(img) - sizeof(int); // int -> type
+        int shift_file_start = (int) ftell(img) - sizeof(int); // int -> type
         read_files(&file, img);
-        int all_size_of_data = sizeof(file.meta) + sizeof(file.block) + file.meta.name_size + file.block.data_size;
-        // int size_fromend = (all_size_of_data - file_start) -
+        int all_size_of_data = sizeof(int) + sizeof(file.meta) + sizeof(file.block) + file.meta.name_size + file.block.data_size;
 
+        int end_offset = shift_file_start + all_size_of_data;
+
+        fseek(img, end_offset, SEEK_SET);
+        int buffer_size = filesize - end_offset;
+        if (buffer_size < 0) {
+            fclose(img);
+            return;
+        }
+        char* buffer = malloc(buffer_size);
+        if (!buffer) {
+            fclose(img);
+            return;
+        }
+
+        fread(buffer, 1, buffer_size, img);
+
+        fseek(img, shift_file_start, SEEK_SET);
+        fwrite(buffer, 1, buffer_size, img);
+
+        fflush(img);
+
+        fixoffset(img, shift_file_start, all_size_of_data);
+        file_truncate(img, filesize - all_size_of_data);
+        free(buffer);
+        free_files(&file);
     }
-    else {}
+    else {
+        int offsetoffolder = doffset(img_name, shift.name);
+        fseek(img, offsetoffolder, SEEK_SET);
+        int shift_folder_start = (int) ftell(img) - sizeof(int); // int -> type
+        read_dirs(&dir, img);
+        int all_size_of_data = sizeof(int) + sizeof(dir.meta) + dir.meta.name_size;
+
+        int end_offset = shift_folder_start + all_size_of_data;
+
+        fseek(img, end_offset, SEEK_SET);
+        int buffer_size = filesize - end_offset;
+        if (buffer_size < 0) {
+            fclose(img);
+            return;
+        }
+        char* buffer = malloc(buffer_size);
+        if (!buffer) {
+            fclose(img);
+            return;
+        }
+
+        fread(buffer, 1, buffer_size, img);
+
+        fseek(img, shift_folder_start, SEEK_SET);
+        fwrite(buffer, 1, buffer_size, img);
+
+        fflush(img);
+        fixoffset(img, shift_folder_start, all_size_of_data);
+        file_truncate(img, filesize - all_size_of_data);
+        free(buffer);
+        free_dirs(&dir);
+    }
 
 }
 
+void rmdir_recursive(const char* img_name, char* name) {
+    int offset = doffset(img_name, name);
+
+    FILE *img = fopen(img_name, "rb");
+    if (!img) return;
+
+    int type;
+    DirBlock dir;
+    FileBlock file;
+
+    fseek(img, 0, SEEK_SET);
+    while (fread(&type, sizeof(int), 1, img) == 1) {
+        if (type == TYPEFILE) {
+            read_files(&file, img);
+
+            if (file.meta.isfree == 0 &&
+                file.meta.parent_offset == offset) {
+
+                Shifting shift;
+                shift.name = file.name;
+                shift.type = TYPEFILE;
+
+                shiftIT(img_name, shift);
+
+                img = fopen(img_name, "rb");
+                fseek(img, 0, SEEK_SET);
+                free_files(&file);
+                continue;
+            }
+            free_files(&file);
+        } else if (type == TYPEDIR) {
+            seek_dir(img);
+        }
+    }
+
+    fseek(img, 0, SEEK_SET);
+    while (fread(&type, sizeof(int), 1, img) == 1) {
+        if (type == TYPEDIR) {
+            read_dirs(&dir, img);
+
+            if (dir.meta.isfree == 0 &&
+                dir.meta.parent_offset == offset) {
+
+                int child_offset = dir.meta.offset;
+                fclose(img);
+
+                rmdir_recursive(img_name, dir.name);
+
+                img = fopen(img_name, "rb");
+                fseek(img, 0, SEEK_SET);
+                free_dirs(&dir);
+                continue;
+            }
+            free_dirs(&dir);
+        } else if (type == TYPEFILE) {
+            seek_files(img);
+        }
+    }
+
+    Shifting s;
+    s.type = TYPEDIR;
+    s.name = name;
+    shiftIT(img_name, s);
+    fclose(img);
+}
 
 
 void
-newdir(const char *dirname, int parent_offset)
+newdir(const char* img_name, const char *dirname, int parent_offset)
 {
-    if (doffset(dirname) != 0) {
+    if (doffset(img_name,dirname) != 0) {
+
         return;
     };
 	FILE           *img;
@@ -212,20 +377,14 @@ newdir(const char *dirname, int parent_offset)
 	dir.meta.name_size = strlen(dirname) + 1;
 	dir.name = malloc(dir.meta.name_size);
 	strncpy(dir.name, dirname, dir.meta.name_size);
-	dir.name[dir.meta.name_size] = '\0';
 	dir.meta.isfree = 0;
 	dir.meta.parent_offset = parent_offset;
 	int 		type = TYPEDIR;
 
 	long 		write_pos;
 
-	if (overwrite(0) != -1) {
-		img = fopen(IMG, "r+b");
-		write_pos = write.diroffset;
-	} else {
-		img = fopen(IMG, "ab");
+		img = fopen(img_name, "ab");
 		write_pos = ftell(img);
-	}
 
 	if (img == NULL) {
 		perror("file open error");
@@ -234,39 +393,34 @@ newdir(const char *dirname, int parent_offset)
 	fseek(img, write_pos, SEEK_SET);
 	fwrite(&type, sizeof(int), 1, img);
 	dir.meta.offset = (int) ftell(img);
-	fwrite(&dir.meta, sizeof(MetaBlock), 1, img);
-	fwrite(dir.name, 1, dir.meta.name_size, img);
+	write_dirs(dir, img);
+	free(dir.name);
 	fclose(img);
 }
 
 void
-newfile(const char *filename, char *data, int parent_offset)
+newfile(const char* img_name, const char *filename, char *data, int parent_offset)
 {
-    if (foffset(filename) != 0) {
+    if (foffset(img_name, filename) != 0) {
         return;
     }
 	FILE           *img;
 	FileBlock 	file;
-	file.meta.name_size = strlen(filename);
-	file.name = malloc(file.meta.name_size + 1);
+	file.meta.name_size = strlen(filename) + 1;
+	file.name = malloc(file.meta.name_size);
 	strncpy(file.name, filename, file.meta.name_size);
-	file.name[file.meta.name_size] = '\0';
-	file.block.data_size = strlen(data);
-	file.data = malloc(file.block.data_size + 1);
+	file.block.data_size = strlen(data) + 1;
+	file.data = malloc(file.block.data_size);
 	strncpy(file.data, data, file.block.data_size);
-	file.data[file.block.data_size] = '\0';
 	file.meta.parent_offset = parent_offset;
 	file.meta.isfree = 0;
 	int 		type = TYPEFILE;
 	long 		write_pos;
 
-	if (overwrite(1) != -1) {
-		img = fopen(IMG, "r+b");
-		write_pos = write.fileoffset;
-	} else {
-		img = fopen(IMG, "ab");
+
+		img = fopen(img_name, "ab");
 		write_pos = ftell(img);
-	}
+
 	if (img == NULL) {
 		perror("file open error");
 		return;
@@ -274,19 +428,16 @@ newfile(const char *filename, char *data, int parent_offset)
 	fseek(img, write_pos, SEEK_SET);
 	fwrite(&type, sizeof(int), 1, img);
 	file.meta.offset = (int) ftell(img);
-	fwrite(&file.meta, sizeof(MetaBlock), 1, img);
-	int data_start = (sizeof(MetaBlock) + sizeof(FileMetaBlock) + file.meta.name_size);
-	file.block.data_start = data_start;
-	fwrite(&file.block, sizeof(FileMetaBlock), 1, img);
-	fwrite(file.name, 1, file.meta.name_size, img);
-	fwrite(file.data, 1, file.block.data_size, img);
+	write_files(file, img);
+	free(file.name);
+	free(file.data);
 	fclose(img);
 }
 
 void
-list(int dir_offset)
+list(const char* img_name, int dir_offset)
 {
-	FILE           *img = fopen(IMG, "rb");
+	FILE           *img = fopen(img_name, "rb");
 	if (img == NULL) {
 		perror("file read errror");
 		return;
@@ -301,14 +452,13 @@ list(int dir_offset)
 			if (dir.meta.isfree == 0 && dir.meta.parent_offset == dir_offset) {
 				printf("[DIR] %s\n", dir.name);
 			}
+			free_dirs(&dir);
 		} else if (type == TYPEFILE) {
 		    read_files(&file, img);
 			if (file.meta.isfree == 0 && file.meta.parent_offset == dir_offset) {
 				printf("[FILE] %s\n", file.name);
 			}
-		} else {
-			printf("File/Folder didnt read.");
-			break;
+			free_files(&file);
 		}
 	}
 
@@ -316,82 +466,11 @@ list(int dir_offset)
 }
 
 
-
 void
-file_del(const char *filename, int parent_offset) {}
-/*
-{
-	FILE           *img = fopen(IMG, "r+b");
-	if (img == NULL) {
-		perror("file open error");
-		return;
-	}
-	int 		type;
-	FileBlock 	file;
-	DirBlock 	dir;
-	long 		pos;
-	while (fread(&type, sizeof(int), 1, img) == 1) {
-		pos = ftell(img);
-		if (type == TYPEFILE) {
-			fread(&file, sizeof(FileBlock), 1, img);
-			if (file.meta.parent_offset == parent_offset &&
-			    strcmp(file.name, filename) == 0) {
-				file.meta.isfree = 1;
-				fseek(img, pos, SEEK_SET);
-				fwrite(&file, sizeof(FileBlock), 1, img);
-				fclose(img);
-				return;
-			}
-		} else if (type == TYPEDIR) {
-			seek_dir(img);
-		} else {
-			perror("type is not found");
-			return;
-		}
-	}
-	fclose(img);
-	fprintf(stderr, "file not found\n");
-}
-*/
-
-void
-del_dir(const char *dirname, int parent_offset) {}
-/*
-{
-	FILE           *img = fopen(IMG, "r+b");
-	if (img == NULL) {
-		perror("delete dir failed open error");
-		return;
-	}
-	int 		type;
-	DirBlock 	dir;
-	long 		pos;
-	while (fread(&type, sizeof(int), 1, img) == 1) {
-		pos = ftell(img);
-		if (type == TYPEDIR) {
-			fread(&dir, sizeof(DirBlock), 1, img);
-			if (dir.meta.parent_offset == parent_offset &&
-			    strcmp(dir.name, dirname) == 0) {
-				dir.meta.isfree = 1;
-				fseek(img, pos, SEEK_SET);
-				fwrite(&dir, sizeof(DirBlock), 1, img);
-				fclose(img);
-				return;
-			}
-		} else if (type == TYPEFILE) {
-			fseek(img, sizeof(FileBlock), SEEK_CUR);
-		} else {
-			break;
-		}
-	}
-}
-*/
-
-void
-lookatdata(const char *filename, int parent_offset, char *out,
+lookatdata(const char* img_name, const char *filename, int parent_offset, char *out,
 	   size_t size)
 {
-	FILE           *img = fopen(IMG, "rb");
+	FILE           *img = fopen(img_name, "rb");
 	if (img == NULL) {
 		perror("lookatdata file open error");
 		return;
@@ -406,9 +485,11 @@ lookatdata(const char *filename, int parent_offset, char *out,
 			    strcmp(file.name, filename) == 0) {
 				strncpy(out, file.data, size - 1);
 				out[size - 1] = '\0';
+				free_files(&file);
 				fclose(img);
 				return;
 			}
+			free_files(&file);
 		} else if (type == TYPEDIR) {
 			DirBlock dir;
 			seek_dir(img);
@@ -422,9 +503,9 @@ lookatdata(const char *filename, int parent_offset, char *out,
 }
 
 void
-cd(char *foldername)
+cd(const char* img_name, char *foldername)
 {
-	FILE           *img = fopen(IMG, "rb");
+	FILE           *img = fopen(img_name, "rb");
 	if (img == NULL) {
 		perror("cd open failed");
 		return;
@@ -442,6 +523,7 @@ cd(char *foldername)
 					free_dirs(&dir);
 					return;
 				}
+				free_dirs(&dir);
 			} else if (dir.meta.isfree == 0 && dir.meta.parent_offset == movement_parent &&
 				   strcmp(dir.name, foldername) == 0) {
 				old_parent = movement_parent;
@@ -450,6 +532,7 @@ cd(char *foldername)
 				free_dirs(&dir);
 				return;
 			}
+			free_dirs(&dir);
 		} else if (type == TYPEFILE) {
 		    seek_files(img);
 		}
@@ -459,9 +542,9 @@ cd(char *foldername)
 }
 
 void
-pwd(char *pwdout)
+pwd(const char* img_name, char *pwdout)
 {
-	FILE           *img = fopen(IMG, "rb");
+	FILE           *img = fopen(img_name, "rb");
 	if (img == NULL) {
 		perror("pwd open failed");
 		return;
@@ -481,8 +564,10 @@ pwd(char *pwdout)
 					snprintf(temp, sizeof(temp), "/%s%s", dir.name, path);
 					strcpy(path, temp);
 					curroffset = dir.meta.parent_offset;
+					free_dirs(&dir);
 					break;
 				}
+				free_dirs(&dir);
 			} else if (type == TYPEFILE) {
 				seek_files(img);
 			}
@@ -498,18 +583,13 @@ int
 main()
 {
 	int 		loop = 1;
-	newdir("quickstart", 0);
-	newfile("quickstart.txt", data, doffset("quickstart"));
-
-	Shifting shift;
-	shift.type = TYPEFILE;
-	shift.name = "quickstart.txt";
-	shiftIT(shift);
+	newdir(IMG, "quickstart", 0);
+	newfile(IMG, "quickstart.txt", data, doffset(IMG,"quickstart"));
 
 	while (loop) {
 		char 		pwdout   [256];
 		char 		input    [512];
-		pwd(pwdout);
+		pwd(IMG,pwdout);
 		printf("/%s -> ", pwdout);
 
 		if (fgets(input, sizeof(input), stdin) == NULL) {
@@ -522,13 +602,13 @@ main()
 			continue;
 		}
 		if (strcmp(command, "ls") == 0) {
-			list(movement_parent);
+			list(IMG, movement_parent);
 		} else if (strcmp(command, "exit") == 0) {
 			loop = 0;
 		} else if (strcmp(command, "cd") == 0) {
 			char           *folder = strtok(NULL, " ");
 			if (folder != NULL) {
-				cd(folder);
+				cd(IMG, folder);
 			} else {
 				printf("undefined folder\n");
 			}
@@ -536,7 +616,7 @@ main()
 			char           *file = strtok(NULL, " ");
 			if (file != NULL) {
 				char 		out      [4096];
-				lookatdata(file, movement_parent, out, sizeof(out));
+				lookatdata(IMG, file, movement_parent, out, sizeof(out));
 				printf("%s\n", out);
 			} else {
 				printf("undefined file\n");
@@ -544,7 +624,7 @@ main()
 		} else if (strcmp(command, "mkdir") == 0) {
 			char           *name = strtok(NULL, " ");
 			if (name != NULL) {
-				newdir(name, movement_parent);
+				newdir(IMG, name, movement_parent);
 			} else {
 				printf("undefined name\n");
 			}
@@ -557,13 +637,16 @@ main()
 				strcat(buffer, " ");
 				data = strtok(NULL, " ");
 			}
-			newfile(name, buffer, movement_parent);
+			newfile(IMG, name, buffer, movement_parent);
 		} else if (strcmp(command, "rmdir") == 0) {
 			char           *name = strtok(NULL, " ");
-			del_dir(name, movement_parent);
+			rmdir_recursive(IMG, name);
 		} else if (strcmp(command, "rm") == 0) {
 			char           *name = strtok(NULL, " ");
-			file_del(name, movement_parent);
+			Shifting shift;
+			shift.name = name;
+			shift.type = TYPEFILE;
+			shiftIT(IMG, shift);
 		} else {
 			printf("unrecognized command: %s\n", command);
 		}
