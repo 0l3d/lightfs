@@ -279,68 +279,72 @@ void lfs_rm(LightFS *fs, char* name) {
 	shiftIT(fs, shift);
 }
 
-void lfs_rmdir(LightFS *fs, char* name) {
+
+void lfs_rmdir(LightFS *fs, char *name) {
     int offset = lfs_doffset(fs, name, fs->movement_parent);
-
+    int curr_offset = fs->movement_parent;
+    fs->movement_parent = offset;
     FILE *img = fs->img;
-
-    rewind(img);
 
     int type;
     DirBlock dir;
     FileBlock file;
 
-    fseek(img, 0, SEEK_SET);
+    char *files[256];
+    char *dirs[256];
+    int file_count = 0;
+    int dir_count  = 0;
+
+    rewind(img);
+
     while (fread(&type, sizeof(int), 1, img) == 1) {
         if (type == TYPEFILE) {
             read_files(&file, img);
 
-            if (file.meta.isfree == 0 &&
-                file.meta.parent_offset == offset) {
+            if (!file.meta.isfree &&
+                file.meta.parent_offset == offset &&
+                file_count < 256) {
 
-                Shifting shift;
-                shift.name = file.name;
-                shift.type = TYPEFILE;
-
-                shiftIT(fs, shift);
-
-                fseek(img, 0, SEEK_SET);
-                free_files(&file);
-                continue;
+                files[file_count++] = strdup(file.name);
             }
-            free_files(&file);
-        } else if (type == TYPEDIR) {
-            seek_dir(img);
-        }
-    }
 
-    fseek(img, 0, SEEK_SET);
-    while (fread(&type, sizeof(int), 1, img) == 1) {
-        if (type == TYPEDIR) {
+            free_files(&file);
+
+        } else if (type == TYPEDIR) {
             read_dirs(&dir, img);
 
-            if (dir.meta.isfree == 0 &&
-                dir.meta.parent_offset == offset) {
+            if (!dir.meta.isfree &&
+                dir.meta.parent_offset == offset &&
+                dir_count < 256) {
 
-                int child_offset = dir.meta.offset;
-
-                lfs_rmdir(fs, dir.name);
-
-                fseek(img, 0, SEEK_SET);
-                free_dirs(&dir);
-                continue;
+                dirs[dir_count++] = strdup(dir.name);
             }
+
             free_dirs(&dir);
-        } else if (type == TYPEFILE) {
-            seek_files(img);
         }
     }
 
+    for (int i = 0; i < file_count; i++) {
+        Shifting s;
+        s.type = TYPEFILE;
+        s.name = files[i];
+
+        shiftIT(fs, s);
+        free(files[i]);
+    }
+
+    for (int i = 0; i < dir_count; i++) {
+        lfs_rmdir(fs, dirs[i]);
+        free(dirs[i]);
+    }
+
+    fs->movement_parent = curr_offset;
     Shifting s;
     s.type = TYPEDIR;
     s.name = name;
     shiftIT(fs, s);
 }
+
 
 
 void
@@ -402,65 +406,155 @@ lfs_newfile(LightFS *fs, const char *filename, char *data, int parent_offset)
 	free(file.data);
 }
 
+
 void
-lfs_list(LightFS *fs)
+lfs_list(LightFS *fs, ListFF *list)
 {
-	FILE           *img = fs->img;
-	rewind(img);
+    FILE *img = fs->img;
+    rewind(img);
 
-	DirBlock 	dir;
-	FileBlock 	file;
+    DirBlock  dir;
+    FileBlock file;
+    int type;
 
-	int 		type;
-	while (fread(&type, sizeof(int), 1, img) == 1) {
-		if (type == TYPEDIR) {
-			read_dirs(&dir, img);
-			if (dir.meta.isfree == 0 && dir.meta.parent_offset == fs->movement_parent) {
-				printf("[DIR] %s\n", dir.name);
-			}
-			free_dirs(&dir);
-		} else if (type == TYPEFILE) {
-		    read_files(&file, img);
-			if (file.meta.isfree == 0 && file.meta.parent_offset == fs->movement_parent) {
-				printf("[FILE] %s\n", file.name);
-			}
-			free_files(&file);
-		}
-	}
+    list->filescount   = 0;
+    list->folderscount = 0;
+    list->entrycount   = 0;
 
+    list->dir   = NULL;
+    list->file  = NULL;
+    list->entry = NULL;
+
+    while (fread(&type, sizeof(int), 1, img) == 1) {
+
+        if (type == TYPEDIR) {
+            read_dirs(&dir, img);
+
+            if (!dir.meta.isfree &&
+                dir.meta.parent_offset == fs->movement_parent) {
+
+                DirBlock *d = malloc(sizeof(DirBlock));
+                d->meta = dir.meta;
+                d->name = strdup(dir.name);
+
+                list->dir = realloc(
+                    list->dir,
+                    sizeof(DirBlock *) * (list->folderscount + 1)
+                );
+                list->dir[list->folderscount++] = d;
+
+                list->entry = realloc(
+                    list->entry,
+                    sizeof(ListEntry *) * (list->entrycount + 1)
+                );
+                list->entry[list->entrycount] = malloc(sizeof(ListEntry));
+                list->entry[list->entrycount]->type = TYPEDIR;
+                list->entry[list->entrycount]->name = strdup(dir.name);
+                list->entrycount++;
+            }
+
+            free_dirs(&dir);
+
+        } else if (type == TYPEFILE) {
+            read_files(&file, img);
+
+            if (!file.meta.isfree &&
+                file.meta.parent_offset == fs->movement_parent) {
+
+                FileBlock *f = malloc(sizeof(FileBlock));
+                f->meta  = file.meta;
+                f->block = file.block;
+                f->name  = strdup(file.name);
+
+                f->data = malloc(file.block.data_size);
+                memcpy(f->data, file.data, file.block.data_size);
+
+                list->file = realloc(
+                    list->file,
+                    sizeof(FileBlock *) * (list->filescount + 1)
+                );
+                list->file[list->filescount++] = f;
+
+                list->entry = realloc(
+                    list->entry,
+                    sizeof(ListEntry *) * (list->entrycount + 1)
+                );
+                list->entry[list->entrycount] = malloc(sizeof(ListEntry));
+                list->entry[list->entrycount]->type = TYPEFILE;
+                list->entry[list->entrycount]->name = strdup(file.name);
+                list->entrycount++;
+            }
+
+            free_files(&file);
+        }
+    }
+}
+
+void
+lfs_free_list(ListFF *list)
+{
+    for (int i = 0; i < list->filescount; i++) {
+        free(list->file[i]);
+    }
+
+    for (int i = 0; i < list->folderscount; i++) {
+        free(list->dir[i]);
+    }
+
+    for (int i = 0; i < list->entrycount; i++) {
+        free(list->entry[i]->name);
+        free(list->entry[i]);
+    }
+
+    free(list->file);
+    free(list->dir);
+    free(list->entry);
+
+    list->file  = NULL;
+    list->dir   = NULL;
+    list->entry = NULL;
+
+    list->filescount   = 0;
+    list->folderscount = 0;
+    list->entrycount   = 0;
 }
 
 
 void
-lfs_cat(LightFS *fs, const char *filename, int parent_offset, char *out)
+lfs_cat(LightFS *fs, const char *filename, int parent_offset, char **out)
 {
-	FILE           *img = fs->img;
+    FILE *img = fs->img;
+    int type;
+    FileBlock file;
 
-	rewind(img);
-	int 		type;
-	FileBlock 	file;
+    *out = NULL;
 
-	while (fread(&type, sizeof(int), 1, img) == 1) {
-		if (type == TYPEFILE) {
-			read_files(&file, img);
-			if (file.meta.isfree == 0 && file.meta.parent_offset == parent_offset &&
-			    strcmp(file.name, filename) == 0) {
-				out = malloc(file.block.data_size);
-				memcpy(out, file.data, file.block.data_size);
-				free_files(&file);
-				return;
-			}
-			free_files(&file);
-		} else if (type == TYPEDIR) {
-			DirBlock dir;
-			seek_dir(img);
-		} else {
-			return;
-		}
-	}
+    rewind(img);
 
-	return;
+    while (fread(&type, sizeof(int), 1, img) == 1) {
+        if (type == TYPEFILE) {
+            read_files(&file, img);
+
+            if (!file.meta.isfree &&
+                file.meta.parent_offset == parent_offset &&
+                strcmp(file.name, filename) == 0) {
+
+                *out = malloc(file.block.data_size + 1);
+                memcpy(*out, file.data, file.block.data_size);
+                (*out)[file.block.data_size] = '\0';
+
+                free_files(&file);
+                return;
+            }
+
+            free_files(&file);
+
+        } else if (type == TYPEDIR) {
+            seek_dir(img);
+        }
+    }
 }
+
 
 void
 lfs_cd(LightFS *fs, char *foldername)
@@ -480,7 +574,6 @@ lfs_cd(LightFS *fs, char *foldername)
 					free_dirs(&dir);
 					return;
 				}
-				free_dirs(&dir);
 			} else if (dir.meta.isfree == 0 && dir.meta.parent_offset == fs->movement_parent &&
 				   strcmp(dir.name, foldername) == 0) {
 				fs->old_parent = fs->movement_parent;
@@ -499,9 +592,10 @@ lfs_cd(LightFS *fs, char *foldername)
 void lfs_go_path(LightFS *fs, char *path) {
     int path_timer = 0;
     int outpathoffset = 0;
-    char* folder = strtok(path, " / ");
+    char* folder = strtok(path, "/");
     while (folder != NULL) {
         lfs_cd(fs, folder);
+        folder = strtok(NULL, "/");
     }
 }
 

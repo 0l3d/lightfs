@@ -1,9 +1,8 @@
 # Lightfs
 
-Lightweight and Simple filesystem simulator and library.
+Lightfs is lightweight and simple filesystem simulator and single header library.
 
 ## Features
-
 - Change dir with : cd <dir>
 - Create folder with : mkdir <foldername>
 - Create file with : new <filename> <filedata>

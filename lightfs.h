@@ -42,17 +42,33 @@ typedef struct {
     char *data;
 } FileBlock;
 
+typedef struct {
+    int type;
+    char* name;
+} ListEntry;
+
+typedef  struct  {
+    int filescount;
+    int folderscount;
+    int entrycount;
+    DirBlock **dir;
+    FileBlock **file;
+    ListEntry **entry;
+} ListFF;
+
 int  lfs_doffset(LightFS *fs, const char *name, int parent_offset);
 int  lfs_foffset(LightFS *fs, const char *name, int parent_offset);
 
 void lfs_newdir(LightFS *fs, const char *name, int parent_offset);
 void lfs_newfile(LightFS *fs, const char *name, char *data, int parent_offset);
 
-void lfs_list(LightFS *fs);
+void lfs_list(LightFS *fs, ListFF *list);
+void lfs_free_list(ListFF *list);
 void lfs_cd(LightFS *fs, char *name);
 void lfs_pwd(LightFS *fs, char *out);
+void lfs_go_path(LightFS *fs, char *path);
 
-void lfs_cat(LightFS *fs, const char *filename, int parent_offset, char *out);
+void lfs_cat(LightFS *fs, const char *filename, int parent_offset, char **out);
 
 void lfs_rm(LightFS *fs, char *name);
 void lfs_rmdir(LightFS *fs, char *name);

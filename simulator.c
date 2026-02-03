@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include "lightfs.h"
 
-#define IMG "file.img"
+#define IMG "fs.img"
 
 char data[] = "Welcome to Lightfs!\n"
 "Features:\n"
@@ -45,12 +45,23 @@ int main() {
         if (!command) continue;
 
         if (strcmp(command, "ls") == 0) {
-            lfs_list(&fs);
+            ListFF f;
+            lfs_list(&fs, &f);
+            for (int i = 0; i < f.entrycount; i++) {
+                if (f.entry[i]->type == TYPEDIR) {
+                    printf("[DIR] %s\n", f.entry[i]->name);
+                } else {
+                    printf("[FILE] %s\n", f.entry[i]->name);
+                }
+            }
+            lfs_free_list(&f);
         } else if (strcmp(command, "exit") == 0) {
             loop = 0;
         } else if (strcmp(command, "cd") == 0) {
             char *folder = strtok(NULL, " ");
-            if (folder) {
+            if (strchr(folder, '/')) {
+                lfs_go_path(&fs, folder);
+            }  else if (folder) {
                 lfs_cd(&fs, folder);
             } else {
                 printf("undefined folder\n");
@@ -59,7 +70,7 @@ int main() {
             char *file = strtok(NULL, " ");
             if (file) {
                 char *out;
-                lfs_cat(&fs, file, fs.movement_parent, out);
+                lfs_cat(&fs, file, fs.movement_parent, &out);
                 printf("%s\n", out);
                 free(out);
             } else {
