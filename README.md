@@ -8,6 +8,8 @@ Lightfs is lightweight and simple filesystem simulator and single header library
 - Create file with : new <filename> <filedata>
 - Look at File with : cat <filename>
 - List folders and Files : ls
+- Remove Files: rm <filename>
+- Remove Folders: rmdir <foldername>
 
 ## Usage and Files
 
