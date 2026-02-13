@@ -14,7 +14,7 @@ Lightfs is lightweight and simple filesystem simulator and single header library
 ## Usage and Files
 
 ```
-git clone https://github.com/0l3d/lightfs.git
+git clone https://git.sr.ht/~oled/lightfs
 cd lightfs/
 gcc lightfs.c -o lightfs
 ./lightfs
@@ -30,4 +30,4 @@ This project is licensed under the **GPL-3.0 License**.
 
 # Author
 
-Created By **0l3d**.
+Created By **oled**.
