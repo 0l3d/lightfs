@@ -30,13 +30,13 @@ read_dirs(DirBlock * dir, FILE * img)
 	fread(dir->name, 1, dir->meta.name_size, img);
 }
 
-void 
+void
 free_dirs(DirBlock * dir)
 {
 	free(dir->name);
 }
 
-void 
+void
 seek_dir(FILE * img)
 {
 	DirBlock 	dir;
@@ -44,7 +44,7 @@ seek_dir(FILE * img)
 	fseek(img, dir.meta.name_size, SEEK_CUR);
 }
 
-void 
+void
 read_files(FileBlock * file, FILE * img)
 {
 	fread(&file->meta, sizeof(MetaBlock), 1, img);
@@ -55,7 +55,7 @@ read_files(FileBlock * file, FILE * img)
 	fread(file->data, 1, file->block.data_size, img);
 }
 
-void 
+void
 write_files(FileBlock file, FILE * img)
 {
 	fwrite(&file.meta, sizeof(MetaBlock), 1, img);
@@ -66,21 +66,21 @@ write_files(FileBlock file, FILE * img)
 	fwrite(file.data, 1, file.block.data_size, img);
 }
 
-void 
+void
 write_dirs(DirBlock dir, FILE * img)
 {
 	fwrite(&dir.meta, sizeof(MetaBlock), 1, img);
 	fwrite(dir.name, 1, dir.meta.name_size, img);
 }
 
-void 
+void
 free_files(FileBlock * file)
 {
 	free(file->name);
 	free(file->data);
 }
 
-void 
+void
 seek_files(FILE * img)
 {
 	FileBlock 	file;
@@ -280,7 +280,7 @@ shiftIT(LightFS * fs, Shifting shift)
 
 }
 
-void 
+void
 lfs_rm(LightFS * fs, char *name)
 {
 	Shifting 	shift;
@@ -290,7 +290,7 @@ lfs_rm(LightFS * fs, char *name)
 }
 
 
-void 
+void
 lfs_rmdir(LightFS * fs, char *name)
 {
 	int 		offset = lfs_doffset(fs, name, fs->movement_parent);
@@ -529,7 +529,7 @@ lfs_free_list(ListFF * list)
 
 
 void
-lfs_cat(LightFS * fs, const char *filename, int parent_offset, char **out, size_t *size)
+lfs_cat(LightFS * fs, const char *filename, int parent_offset, char **out, size_t * size)
 {
 	FILE           *img = fs->img;
 	int 		type;
@@ -597,7 +597,7 @@ lfs_cd(LightFS * fs, char *foldername)
 	printf("Folder '%s' not found.\n", foldername);
 }
 
-void 
+void
 lfs_go_path(LightFS * fs, char *path)
 {
 	int 		path_timer = 0;
