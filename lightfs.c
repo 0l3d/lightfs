@@ -529,7 +529,7 @@ lfs_free_list(ListFF * list)
 
 
 void
-lfs_cat(LightFS * fs, const char *filename, int parent_offset, char **out)
+lfs_cat(LightFS * fs, const char *filename, int parent_offset, char **out, size_t *size)
 {
 	FILE           *img = fs->img;
 	int 		type;
@@ -550,6 +550,7 @@ lfs_cat(LightFS * fs, const char *filename, int parent_offset, char **out)
 				*out = malloc(file.block.data_size + 1);
 				memcpy(*out, file.data, file.block.data_size);
 				(*out)[file.block.data_size] = '\0';
+				*size = file.block.data_size;
 
 				free_files(&file);
 				return;

@@ -75,8 +75,9 @@ main()
 			char           *file = strtok(NULL, " ");
 			if (file) {
 				char           *out;
-				lfs_cat(&fs, file, fs.movement_parent, &out);
-				printf("%s\n", out);
+				size_t 		size;
+				lfs_cat(&fs, file, fs.movement_parent, &out, &size);
+				printf("%s\nSIZE: %lu\n", out, size);
 				free(out);
 			} else {
 				printf("undefined file\n");
