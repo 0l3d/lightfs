@@ -60,8 +60,7 @@ int 		lfs_doffset(LightFS * fs, const char *name, int parent_offset);
 int 		lfs_foffset(LightFS * fs, const char *name, int parent_offset);
 
 void 		lfs_newdir(LightFS * fs, const char *name, int parent_offset);
-void 		lfs_newfile(LightFS * fs, const char *name, char *data, int parent_offset);
-
+void 		lfs_newfile(LightFS * fs, const char *name, char *data, size_t size, int parent_offset);
 void 		lfs_list (LightFS * fs, ListFF * list);
 void 		lfs_free_list(ListFF * list);
 void 		lfs_cd   (LightFS * fs, char *name);

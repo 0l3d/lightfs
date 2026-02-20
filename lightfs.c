@@ -386,7 +386,7 @@ lfs_newdir(LightFS * fs, const char *dirname, int parent_offset)
 }
 
 void
-lfs_newfile(LightFS * fs, const char *filename, char *data, int parent_offset)
+lfs_newfile(LightFS * fs, const char *filename, char *data, size_t size, int parent_offset)
 {
 	if (lfs_foffset(fs, filename, parent_offset) != -1) {
 		return;
@@ -396,7 +396,7 @@ lfs_newfile(LightFS * fs, const char *filename, char *data, int parent_offset)
 	file.meta.name_size = strlen(filename) + 1;
 	file.name = malloc(file.meta.name_size);
 	memcpy(file.name, filename, file.meta.name_size);
-	file.block.data_size = strlen(data) + 1;
+	file.block.data_size = size;
 	file.data = malloc(file.block.data_size);
 	memcpy(file.data, data, file.block.data_size);
 	file.meta.parent_offset = parent_offset;
