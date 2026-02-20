@@ -31,7 +31,7 @@ main()
 	fs.old_parent = 0;
 
 	lfs_newdir(&fs, "quickstart", 0);
-	lfs_newfile(&fs, "quickstart.txt", data, lfs_doffset(&fs, "quickstart", 0));
+	lfs_newfile(&fs, "quickstart.txt", data, strlen(data), lfs_doffset(&fs, "quickstart", 0));
 
 	int 		loop = 1;
 	while (loop) {
@@ -99,7 +99,7 @@ main()
 					strcat(buffer, " ");
 					datapart = strtok(NULL, " ");
 				}
-				lfs_newfile(&fs, name, buffer, fs.movement_parent);
+				lfs_newfile(&fs, name, buffer, strlen(buffer), fs.movement_parent);
 			} else {
 				printf("undefined file or data\n");
 			}
